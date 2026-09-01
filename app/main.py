@@ -4,7 +4,7 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 from dotenv import load_dotenv
 
 
@@ -21,17 +21,40 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 dp = Dispatcher()
 
+keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Help")]
+    ],
+    resize_keyboard=True
+)
+
 
 @dp.message(CommandStart())
 async def start_handler(message: Message):
     logger.info("User %s used /start", message.from_user.id)
-    await message.answer("Привіт! Бот працює ✅")
+
+    await message.answer(
+        "Привіт! Бот працює ✅",
+        reply_markup=keyboard
+    )
 
 
 @dp.message(Command("help"))
 async def help_handler(message: Message):
     logger.info("User %s used /help", message.from_user.id)
-    await message.answer("Доступні команди: /start, /help")
+
+    await message.answer(
+        "Доступні команди:\n/start — запустити бота\n/help — допомога"
+    )
+
+
+@dp.message(lambda message: message.text == "Help")
+async def help_button_handler(message: Message):
+    logger.info("User %s pressed Help button", message.from_user.id)
+
+    await message.answer(
+        "Доступні команди:\n/start — запустити бота\n/help — допомога"
+    )
 
 
 async def main():
