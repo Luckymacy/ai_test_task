@@ -4,7 +4,7 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import Message
 from dotenv import load_dotenv
 from sqlalchemy import text
 
@@ -13,148 +13,167 @@ from app.database import engine
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-
-logger = logging.getLogger(__name__)
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-dp = Dispatcher()
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN is not set")
 
-keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Help")]
-    ],
-    resize_keyboard=True
-)
+
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
 
 @dp.message(CommandStart())
 async def start_handler(message: Message):
-    logger.info("User %s used /start", message.from_user.id)
-
     await message.answer(
         "Привіт! Бот працює ✅\n\n"
         "Доступні команди:\n"
-        "/start — запустити бота\n"
         "/help — допомога\n"
-        "/add_income — додати тестове замовлення",
-        reply_markup=keyboard
+        "/add_income — додати дохід"
     )
 
 
 @dp.message(Command("help"))
 async def help_handler(message: Message):
-    logger.info("User %s used /help", message.from_user.id)
-
     await message.answer(
-        "Доступні команди:\n"
-        "/start — запустити бота\n"
-        "/help — допомога\n"
-        "/add_income — додати тестове замовлення"
-    )
-
-
-@dp.message(lambda message: message.text == "Help")
-async def help_button_handler(message: Message):
-    logger.info("User %s pressed Help button", message.from_user.id)
-
-    await message.answer(
-        "Доступні команди:\n"
-        "/start — запустити бота\n"
-        "/help — допомога\n"
-        "/add_income — додати тестове замовлення"
+        "Для додавання доходу використай команду:\n\n"
+        "/add_income СУМА КАТЕГОРІЯ ОПИС\n\n"
+        "Наприклад:\n"
+        "/add_income 1800 rental Оренда сукні"
     )
 
 
 @dp.message(Command("add_income"))
 async def add_income_handler(message: Message):
-    logger.info("User %s used /add_income", message.from_user.id)
+    parts = message.text.split(maxsplit=3)
 
-    async with engine.begin() as connection:
-        order_result = await connection.execute(
-            text(
-                """
-                INSERT INTO orders (
-                    client_name,
-                    rental_date,
-                    return_date,
-                    status,
-                    total_amount
-                )
-                VALUES (
-                    :client_name,
-                    CURRENT_DATE,
-                    CURRENT_DATE + INTERVAL '2 days',
-                    'paid',
-                    1600
-                )
-                RETURNING id
-                """
-            ),
-            {
-                "client_name": message.from_user.full_name or "Telegram client"
-            }
+    if len(parts) < 4:
+        await message.answer(
+            "Неправильний формат ❌\n\n"
+            "Використай:\n"
+            "/add_income СУМА КАТЕГОРІЯ ОПИС\n\n"
+            "Наприклад:\n"
+            "/add_income 1800 rental Оренда сукні"
         )
+        return
 
-        order_id = order_result.scalar_one()
+    amount_text = parts[1]
+    category = parts[2].strip()
+    description = parts[3].strip()
 
-        await connection.execute(
-            text(
-                """
-                INSERT INTO order_items (order_id, item_name, price)
-                VALUES
-                    (:order_id, 'Dress', 1000),
-                    (:order_id, 'Shoes', 400),
-                    (:order_id, 'Accessories', 200)
-                """
-            ),
-            {"order_id": order_id}
+    try:
+        amount = float(amount_text.replace(",", "."))
+    except ValueError:
+        await message.answer(
+            "Сума повинна бути числом.\n"
+            "Наприклад:\n"
+            "/add_income 1800 rental Оренда сукні"
         )
+        return
 
-        await connection.execute(
-            text(
-                """
-                INSERT INTO transactions (
-                    order_id,
-                    type,
-                    amount,
-                    category,
-                    description
-                )
-                VALUES (
-                    :order_id,
-                    'income',
-                    1600,
-                    'rental',
-                    'Dress 1000 UAH, Shoes 400 UAH, Accessories 200 UAH'
-                )
-                """
-            ),
-            {"order_id": order_id}
+    if amount <= 0:
+        await message.answer("Сума повинна бути більшою за 0.")
+        return
+
+    if not category or not description:
+        await message.answer(
+            "Категорія та опис не можуть бути порожніми."
         )
+        return
 
-    await message.answer(
-        f"Замовлення #{order_id} додано ✅\n"
-        "Сукня — 1000 грн\n"
-        "Взуття — 400 грн\n"
-        "Аксесуари — 200 грн\n"
-        "Загальна сума — 1600 грн"
+    client_name = (
+        message.from_user.full_name
+        if message.from_user
+        else "Telegram client"
     )
+
+    try:
+        async with engine.begin() as connection:
+            order_result = await connection.execute(
+                text(
+                    """
+                    INSERT INTO orders (
+                        client_name,
+                        status,
+                        total_amount
+                    )
+                    VALUES (
+                        :client_name,
+                        'paid',
+                        :total_amount
+                    )
+                    RETURNING id
+                    """
+                ),
+                {
+                    "client_name": client_name,
+                    "total_amount": amount,
+                },
+            )
+
+            order_id = order_result.scalar_one()
+
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO transactions (
+                        order_id,
+                        type,
+                        amount,
+                        category,
+                        description
+                    )
+                    VALUES (
+                        :order_id,
+                        'income',
+                        :amount,
+                        :category,
+                        :description
+                    )
+                    """
+                ),
+                {
+                    "order_id": order_id,
+                    "amount": amount,
+                    "category": category,
+                    "description": description,
+                },
+            )
+
+        await message.answer(
+            "Дохід успішно додано ✅\n\n"
+            f"Сума: {amount:.2f} грн\n"
+            f"Категорія: {category}\n"
+            f"Опис: {description}"
+        )
+
+        logging.info(
+            "Income added: amount=%s category=%s order_id=%s",
+            amount,
+            category,
+            order_id,
+        )
+
+    except Exception:
+        logging.exception("Failed to add income")
+
+        await message.answer(
+            "Не вдалося додати операцію ❌"
+        )
 
 
 async def main():
-    if not BOT_TOKEN:
-        raise ValueError("BOT_TOKEN is not set")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+    )
 
-    logger.info("Bot is starting")
+    logging.info("Bot started")
 
-    bot = Bot(token=BOT_TOKEN)
-
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
