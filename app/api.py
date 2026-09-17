@@ -1,4 +1,3 @@
-import json
 import os
 from datetime import date
 from typing import Literal, Optional
@@ -11,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.database import engine
+from app.prompts import build_improved_prompt
 
 
 load_dotenv()
@@ -281,54 +281,7 @@ async def analyze_transactions():
             }
         )
 
-    transactions_json = json.dumps(
-        transactions,
-        ensure_ascii=False,
-        indent=2,
-    )
-
-    prompt = f"""
-Ти фінансовий AI-аналітик невеликої студії
-оренди одягу The Muse Edit.
-
-Проаналізуй наведені фінансові операції.
-
-Операції:
-{transactions_json}
-
-Поверни ТІЛЬКИ валідний JSON.
-Не використовуй Markdown.
-Не додавай текст до або після JSON.
-
-Формат відповіді:
-
-{{
-  "summary": "короткий підсумок фінансової ситуації",
-  "top_expense_categories": [
-    "категорія 1",
-    "категорія 2"
-  ],
-  "risks": [
-    "ризик 1",
-    "ризик 2"
-  ],
-  "advice": [
-    "порада 1",
-    "порада 2"
-  ]
-}}
-
-Правила:
-- відповідь українською мовою;
-- аналізуй тільки передані операції;
-- не вигадуй дані;
-- summary має бути коротким;
-- top_expense_categories має містити
-  найбільші категорії витрат;
-- risks мають описувати можливі
-  фінансові ризики;
-- advice має містити практичні рекомендації.
-"""
+    prompt = build_improved_prompt(transactions)
 
     try:
         client = AsyncOpenAI(
@@ -342,6 +295,7 @@ async def analyze_transactions():
 
         ai_text = response.output_text.strip()
 
+        import json
         analysis = json.loads(ai_text)
 
     except json.JSONDecodeError:
