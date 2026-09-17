@@ -1,15 +1,25 @@
+import json
+import os
 from datetime import date
 from typing import Literal, Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.database import engine
 
 
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+
 app = FastAPI(title="Dress Rental Planner API")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,6 +28,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5175",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -35,7 +47,9 @@ class TransactionCreate(BaseModel):
 
 @app.get("/api/transactions")
 async def get_transactions(
-    transaction_type: Literal["all", "income", "expense"] = Query(default="all")
+    transaction_type: Literal["all", "income", "expense"] = Query(
+        default="all"
+    )
 ):
     async with engine.connect() as connection:
         if transaction_type == "all":
@@ -52,7 +66,8 @@ async def get_transactions(
                         t.description,
                         o.client_name
                     FROM transactions t
-                    LEFT JOIN orders o ON o.id = t.order_id
+                    LEFT JOIN orders o
+                        ON o.id = t.order_id
                     ORDER BY t.created_at DESC
                     """
                 )
@@ -71,22 +86,32 @@ async def get_transactions(
                         t.description,
                         o.client_name
                     FROM transactions t
-                    LEFT JOIN orders o ON o.id = t.order_id
+                    LEFT JOIN orders o
+                        ON o.id = t.order_id
                     WHERE t.type = :transaction_type
                     ORDER BY t.created_at DESC
                     """
                 ),
-                {"transaction_type": transaction_type},
+                {
+                    "transaction_type": transaction_type,
+                },
             )
 
-        transactions = [dict(row._mapping) for row in result]
+        transactions = [
+            dict(row._mapping)
+            for row in result
+        ]
 
     return transactions
 
 
 @app.post("/api/transactions")
-async def create_transaction(transaction: TransactionCreate):
-    transaction_date = transaction.date or date.today()
+async def create_transaction(
+    transaction: TransactionCreate
+):
+    transaction_date = (
+        transaction.date or date.today()
+    )
 
     async with engine.begin() as connection:
         result = await connection.execute(
@@ -125,13 +150,17 @@ async def create_transaction(transaction: TransactionCreate):
             },
         )
 
-        created_transaction = dict(result.mappings().one())
+        created_transaction = dict(
+            result.mappings().one()
+        )
 
     return created_transaction
 
 
 @app.delete("/api/transactions/{transaction_id}")
-async def delete_transaction(transaction_id: int):
+async def delete_transaction(
+    transaction_id: int
+):
     async with engine.begin() as connection:
         result = await connection.execute(
             text(
@@ -141,7 +170,9 @@ async def delete_transaction(transaction_id: int):
                 RETURNING id
                 """
             ),
-            {"transaction_id": transaction_id},
+            {
+                "transaction_id": transaction_id,
+            },
         )
 
         deleted_id = result.scalar_one_or_none()
@@ -149,7 +180,7 @@ async def delete_transaction(transaction_id: int):
     if deleted_id is None:
         raise HTTPException(
             status_code=404,
-            detail="Transaction not found"
+            detail="Transaction not found",
         )
 
     return {
@@ -175,6 +206,7 @@ async def get_summary():
                         ),
                         0
                     ) AS income,
+
                     COALESCE(
                         SUM(
                             CASE
@@ -185,6 +217,7 @@ async def get_summary():
                         ),
                         0
                     ) AS expenses
+
                 FROM transactions
                 """
             )
@@ -200,3 +233,144 @@ async def get_summary():
         "expenses": expenses,
         "balance": income - expenses,
     }
+
+
+@app.post("/api/ai/analyze-transactions")
+async def analyze_transactions():
+    if not OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAI_API_KEY is not set",
+        )
+
+    async with engine.connect() as connection:
+        result = await connection.execute(
+            text(
+                """
+                SELECT
+                    date,
+                    type,
+                    amount,
+                    category,
+                    description
+                FROM transactions
+                ORDER BY created_at DESC
+                LIMIT 50
+                """
+            )
+        )
+
+        rows = result.mappings().all()
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="No transactions to analyze",
+        )
+
+    transactions = []
+
+    for row in rows:
+        transactions.append(
+            {
+                "date": str(row["date"]),
+                "type": row["type"],
+                "amount": float(row["amount"]),
+                "category": row["category"],
+                "description": row["description"],
+            }
+        )
+
+    transactions_json = json.dumps(
+        transactions,
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    prompt = f"""
+Ти фінансовий AI-аналітик невеликої студії
+оренди одягу The Muse Edit.
+
+Проаналізуй наведені фінансові операції.
+
+Операції:
+{transactions_json}
+
+Поверни ТІЛЬКИ валідний JSON.
+Не використовуй Markdown.
+Не додавай текст до або після JSON.
+
+Формат відповіді:
+
+{{
+  "summary": "короткий підсумок фінансової ситуації",
+  "top_expense_categories": [
+    "категорія 1",
+    "категорія 2"
+  ],
+  "risks": [
+    "ризик 1",
+    "ризик 2"
+  ],
+  "advice": [
+    "порада 1",
+    "порада 2"
+  ]
+}}
+
+Правила:
+- відповідь українською мовою;
+- аналізуй тільки передані операції;
+- не вигадуй дані;
+- summary має бути коротким;
+- top_expense_categories має містити
+  найбільші категорії витрат;
+- risks мають описувати можливі
+  фінансові ризики;
+- advice має містити практичні рекомендації.
+"""
+
+    try:
+        client = AsyncOpenAI(
+            api_key=OPENAI_API_KEY
+        )
+
+        response = await client.responses.create(
+            model="gpt-5.6-luna",
+            input=prompt,
+        )
+
+        ai_text = response.output_text.strip()
+
+        analysis = json.loads(ai_text)
+
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=500,
+            detail="AI returned invalid JSON",
+        )
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI analysis failed: {str(error)}",
+        )
+
+    required_fields = [
+        "summary",
+        "top_expense_categories",
+        "risks",
+        "advice",
+    ]
+
+    for field in required_fields:
+        if field not in analysis:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"AI response is missing "
+                    f"field: {field}"
+                ),
+            )
+
+    return analysis
