@@ -22,6 +22,10 @@ function App() {
     description: "",
   });
 
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+
   const loadData = async () => {
     setLoading(true);
     setError("");
@@ -107,6 +111,8 @@ function App() {
         description: "",
       });
 
+      setAiAnalysis(null);
+
       await loadData();
     } catch (err) {
       setError(err.message);
@@ -118,7 +124,9 @@ function App() {
       "Видалити цю фінансову операцію?"
     );
 
-    if (!confirmed) return;
+    if (!confirmed) {
+      return;
+    }
 
     try {
       setError("");
@@ -134,9 +142,42 @@ function App() {
         throw new Error("Не вдалося видалити операцію");
       }
 
+      setAiAnalysis(null);
+
       await loadData();
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  const handleAiAnalysis = async () => {
+    setAiLoading(true);
+    setAiError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/ai/analyze-transactions`,
+        {
+          method: "POST",
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+
+        throw new Error(
+          errorData?.detail ||
+            "Не вдалося виконати AI-аналіз"
+        );
+      }
+
+      const data = await response.json();
+
+      setAiAnalysis(data);
+    } catch (err) {
+      setAiError(err.message);
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -216,8 +257,96 @@ function App() {
               onChange={handleChange}
             />
 
-            <button type="submit">Додати операцію</button>
+            <button type="submit">
+              Додати операцію
+            </button>
           </form>
+        </section>
+
+        <section className="panel ai-panel">
+          <div className="operations-header">
+            <div>
+              <p className="section-kicker">AI ANALYSIS</p>
+              <h2>AI-аналіз фінансів</h2>
+            </div>
+
+            <button
+              className="ai-button"
+              onClick={handleAiAnalysis}
+              disabled={aiLoading}
+            >
+              {aiLoading
+                ? "Аналізую..."
+                : "Проаналізувати операції"}
+            </button>
+          </div>
+
+          {aiError && (
+            <p className="state-message error-message">
+              {aiError}
+            </p>
+          )}
+
+          {!aiAnalysis && !aiLoading && !aiError && (
+            <p className="state-message">
+              Натисни кнопку, щоб отримати AI-аналіз фінансових операцій.
+            </p>
+          )}
+
+          {aiAnalysis && (
+            <div className="ai-result">
+              <div className="ai-summary">
+                <h3>Підсумок</h3>
+                <p>{aiAnalysis.summary}</p>
+              </div>
+
+              <div className="ai-grid">
+                <div className="ai-card">
+                  <h3>Основні категорії витрат</h3>
+
+                  {aiAnalysis.top_expense_categories?.length > 0 ? (
+                    <ul>
+                      {aiAnalysis.top_expense_categories.map(
+                        (item, index) => (
+                          <li key={index}>{item}</li>
+                        )
+                      )}
+                    </ul>
+                  ) : (
+                    <p>Категорії витрат не визначені.</p>
+                  )}
+                </div>
+
+                <div className="ai-card">
+                  <h3>Ризики</h3>
+
+                  {aiAnalysis.risks?.length > 0 ? (
+                    <ul>
+                      {aiAnalysis.risks.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>Суттєві ризики не визначені.</p>
+                  )}
+                </div>
+
+                <div className="ai-card">
+                  <h3>Рекомендації</h3>
+
+                  {aiAnalysis.advice?.length > 0 ? (
+                    <ul>
+                      {aiAnalysis.advice.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>Рекомендації відсутні.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="panel">
@@ -229,7 +358,9 @@ function App() {
 
             <select
               value={filter}
-              onChange={(event) => setFilter(event.target.value)}
+              onChange={(event) =>
+                setFilter(event.target.value)
+              }
             >
               <option value="all">Усі</option>
               <option value="income">Доходи</option>
@@ -249,66 +380,85 @@ function App() {
             </p>
           )}
 
-          {!loading && !error && transactions.length === 0 && (
-            <p className="state-message">
-              Фінансових операцій поки немає.
-            </p>
-          )}
+          {!loading &&
+            !error &&
+            transactions.length === 0 && (
+              <p className="state-message">
+                Фінансових операцій поки немає.
+              </p>
+            )}
 
-          {!loading && !error && transactions.length > 0 && (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Дата</th>
-                    <th>Клієнт</th>
-                    <th>Тип</th>
-                    <th>Сума</th>
-                    <th>Категорія</th>
-                    <th>Опис</th>
-                    <th>Дія</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {transactions.map((transaction) => (
-                    <tr key={transaction.id}>
-                      <td>{transaction.date}</td>
-                      <td>{transaction.client_name || "-"}</td>
-                      <td>
-                        <span
-                          className={
-                            transaction.type === "income"
-                              ? "type-badge income"
-                              : "type-badge expense"
-                          }
-                        >
-                          {transaction.type === "income"
-                            ? "Дохід"
-                            : "Витрата"}
-                        </span>
-                      </td>
-                      <td>
-                        {Number(transaction.amount).toFixed(2)} грн
-                      </td>
-                      <td>{transaction.category}</td>
-                      <td>{transaction.description}</td>
-                      <td>
-                        <button
-                          className="delete-button"
-                          onClick={() =>
-                            handleDelete(transaction.id)
-                          }
-                        >
-                          Видалити
-                        </button>
-                      </td>
+          {!loading &&
+            !error &&
+            transactions.length > 0 && (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Дата</th>
+                      <th>Клієнт</th>
+                      <th>Тип</th>
+                      <th>Сума</th>
+                      <th>Категорія</th>
+                      <th>Опис</th>
+                      <th>Дія</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+
+                  <tbody>
+                    {transactions.map((transaction) => (
+                      <tr key={transaction.id}>
+                        <td>{transaction.date}</td>
+
+                        <td>
+                          {transaction.client_name || "-"}
+                        </td>
+
+                        <td>
+                          <span
+                            className={
+                              transaction.type === "income"
+                                ? "type-badge income"
+                                : "type-badge expense"
+                            }
+                          >
+                            {transaction.type === "income"
+                              ? "Дохід"
+                              : "Витрата"}
+                          </span>
+                        </td>
+
+                        <td>
+                          {Number(
+                            transaction.amount
+                          ).toFixed(2)}{" "}
+                          грн
+                        </td>
+
+                        <td>{transaction.category}</td>
+
+                        <td>
+                          {transaction.description}
+                        </td>
+
+                        <td>
+                          <button
+                            className="delete-button"
+                            onClick={() =>
+                              handleDelete(
+                                transaction.id
+                              )
+                            }
+                          >
+                            Видалити
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
         </section>
       </main>
     </div>
