@@ -4,3 +4,4 @@ SQLAlchemy==2.0.43
 asyncpg==0.30.0
 fastapi==0.115.0
 uvicorn==0.30.6
+openai
