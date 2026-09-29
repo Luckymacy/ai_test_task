@@ -1,6 +1,8 @@
+import json
 import os
 from datetime import date
 from typing import Literal, Optional
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -9,6 +11,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from app.assistant import run_assistant_chat
 from app.database import engine
 from app.prompts import build_improved_prompt
 
@@ -43,6 +46,11 @@ class TransactionCreate(BaseModel):
     category: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1)
     date: Optional[date] = None
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    thread_id: Optional[str] = None
 
 
 @app.get("/api/transactions")
@@ -206,7 +214,6 @@ async def get_summary():
                         ),
                         0
                     ) AS income,
-
                     COALESCE(
                         SUM(
                             CASE
@@ -217,7 +224,6 @@ async def get_summary():
                         ),
                         0
                     ) AS expenses
-
                 FROM transactions
                 """
             )
@@ -295,7 +301,6 @@ async def analyze_transactions():
 
         ai_text = response.output_text.strip()
 
-        import json
         analysis = json.loads(ai_text)
 
     except json.JSONDecodeError:
@@ -322,9 +327,42 @@ async def analyze_transactions():
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"AI response is missing "
-                    f"field: {field}"
+                    f"AI response is missing field: {field}"
                 ),
             )
 
     return analysis
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(
+    request: ChatRequest
+):
+    if not OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAI_API_KEY is not set",
+        )
+
+    thread_id = (
+        request.thread_id or str(uuid4())
+    )
+
+    try:
+        client = AsyncOpenAI(
+            api_key=OPENAI_API_KEY
+        )
+
+        result = await run_assistant_chat(
+            client=client,
+            thread_id=thread_id,
+            message=request.message,
+        )
+
+        return result
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI chat failed: {str(error)}",
+        )
