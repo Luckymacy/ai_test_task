@@ -26,6 +26,12 @@ function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
 
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatThreadId, setChatThreadId] = useState(null);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
+
   const loadData = async () => {
     setLoading(true);
     setError("");
@@ -39,9 +45,12 @@ function App() {
         throw new Error("Не вдалося завантажити операції");
       }
 
-      const transactionsData = await transactionsResponse.json();
+      const transactionsData =
+        await transactionsResponse.json();
 
-      const summaryResponse = await fetch(`${API_URL}/api/summary`);
+      const summaryResponse = await fetch(
+        `${API_URL}/api/summary`
+      );
 
       if (!summaryResponse.ok) {
         throw new Error("Не вдалося завантажити підсумок");
@@ -79,7 +88,10 @@ function App() {
       return;
     }
 
-    if (!form.category.trim() || !form.description.trim()) {
+    if (
+      !form.category.trim() ||
+      !form.description.trim()
+    ) {
       setError("Заповни категорію та опис");
       return;
     }
@@ -87,18 +99,21 @@ function App() {
     try {
       setError("");
 
-      const response = await fetch(`${API_URL}/api/transactions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          type: form.type,
-          amount: Number(form.amount),
-          category: form.category,
-          description: form.description,
-        }),
-      });
+      const response = await fetch(
+        `${API_URL}/api/transactions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            type: form.type,
+            amount: Number(form.amount),
+            category: form.category,
+            description: form.description,
+          }),
+        }
+      );
 
       if (!response.ok) {
         throw new Error("Не вдалося додати операцію");
@@ -139,7 +154,9 @@ function App() {
       );
 
       if (!response.ok) {
-        throw new Error("Не вдалося видалити операцію");
+        throw new Error(
+          "Не вдалося видалити операцію"
+        );
       }
 
       setAiAnalysis(null);
@@ -163,7 +180,9 @@ function App() {
       );
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
+        const errorData = await response
+          .json()
+          .catch(() => null);
 
         throw new Error(
           errorData?.detail ||
@@ -181,11 +200,89 @@ function App() {
     }
   };
 
+  const sendChatMessage = async (message) => {
+    const cleanMessage = message.trim();
+
+    if (!cleanMessage || chatLoading) {
+      return;
+    }
+
+    setChatError("");
+    setChatLoading(true);
+
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        role: "user",
+        content: cleanMessage,
+      },
+    ]);
+
+    setChatInput("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/ai/chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: cleanMessage,
+            thread_id: chatThreadId,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response
+          .json()
+          .catch(() => null);
+
+        throw new Error(
+          errorData?.detail ||
+            "Не вдалося отримати відповідь асистента"
+        );
+      }
+
+      const data = await response.json();
+
+      setChatThreadId(data.thread_id);
+
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.answer,
+        },
+      ]);
+    } catch (err) {
+      setChatError(err.message);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const handleChatSubmit = async (event) => {
+    event.preventDefault();
+    await sendChatMessage(chatInput);
+  };
+
+  const handleNewChat = () => {
+    setChatMessages([]);
+    setChatThreadId(null);
+    setChatInput("");
+    setChatError("");
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="brand-block">
-          <p className="brand-kicker">RENTAL STUDIO</p>
+          <p className="brand-kicker">
+            RENTAL STUDIO
+          </p>
 
           <h1>The Muse Edit</h1>
 
@@ -198,37 +295,65 @@ function App() {
       <main className="dashboard">
         <div className="cards">
           <div className="card">
-            <span className="card-label">Доходи</span>
-            <p>{Number(summary.income).toFixed(2)} грн</p>
+            <span className="card-label">
+              Доходи
+            </span>
+
+            <p>
+              {Number(summary.income).toFixed(2)} грн
+            </p>
           </div>
 
           <div className="card">
-            <span className="card-label">Витрати</span>
-            <p>{Number(summary.expenses).toFixed(2)} грн</p>
+            <span className="card-label">
+              Витрати
+            </span>
+
+            <p>
+              {Number(summary.expenses).toFixed(2)} грн
+            </p>
           </div>
 
           <div className="card balance-card">
-            <span className="card-label">Баланс</span>
-            <p>{Number(summary.balance).toFixed(2)} грн</p>
+            <span className="card-label">
+              Баланс
+            </span>
+
+            <p>
+              {Number(summary.balance).toFixed(2)} грн
+            </p>
           </div>
         </div>
 
         <section className="panel">
           <div className="section-heading">
             <div>
-              <p className="section-kicker">NEW ENTRY</p>
-              <h2>Додати фінансову операцію</h2>
+              <p className="section-kicker">
+                NEW ENTRY
+              </p>
+
+              <h2>
+                Додати фінансову операцію
+              </h2>
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="transaction-form">
+          <form
+            onSubmit={handleSubmit}
+            className="transaction-form"
+          >
             <select
               name="type"
               value={form.type}
               onChange={handleChange}
             >
-              <option value="income">Дохід</option>
-              <option value="expense">Витрата</option>
+              <option value="income">
+                Дохід
+              </option>
+
+              <option value="expense">
+                Витрата
+              </option>
             </select>
 
             <input
@@ -266,7 +391,10 @@ function App() {
         <section className="panel ai-panel">
           <div className="operations-header">
             <div>
-              <p className="section-kicker">AI ANALYSIS</p>
+              <p className="section-kicker">
+                AI ANALYSIS
+              </p>
+
               <h2>AI-аналіз фінансів</h2>
             </div>
 
@@ -287,11 +415,14 @@ function App() {
             </p>
           )}
 
-          {!aiAnalysis && !aiLoading && !aiError && (
-            <p className="state-message">
-              Натисни кнопку, щоб отримати AI-аналіз фінансових операцій.
-            </p>
-          )}
+          {!aiAnalysis &&
+            !aiLoading &&
+            !aiError && (
+              <p className="state-message">
+                Натисни кнопку, щоб отримати
+                AI-аналіз фінансових операцій.
+              </p>
+            )}
 
           {aiAnalysis && (
             <div className="ai-result">
@@ -302,46 +433,70 @@ function App() {
 
               <div className="ai-grid">
                 <div className="ai-card">
-                  <h3>Основні категорії витрат</h3>
+                  <h3>
+                    Основні категорії витрат
+                  </h3>
 
-                  {aiAnalysis.top_expense_categories?.length > 0 ? (
+                  {aiAnalysis
+                    .top_expense_categories
+                    ?.length > 0 ? (
                     <ul>
-                      {aiAnalysis.top_expense_categories.map(
-                        (item, index) => (
-                          <li key={index}>{item}</li>
-                        )
-                      )}
+                      {aiAnalysis
+                        .top_expense_categories
+                        .map((item, index) => (
+                          <li key={index}>
+                            {item}
+                          </li>
+                        ))}
                     </ul>
                   ) : (
-                    <p>Категорії витрат не визначені.</p>
+                    <p>
+                      Категорії витрат не
+                      визначені.
+                    </p>
                   )}
                 </div>
 
                 <div className="ai-card">
                   <h3>Ризики</h3>
 
-                  {aiAnalysis.risks?.length > 0 ? (
+                  {aiAnalysis.risks?.length >
+                  0 ? (
                     <ul>
-                      {aiAnalysis.risks.map((item, index) => (
-                        <li key={index}>{item}</li>
-                      ))}
+                      {aiAnalysis.risks.map(
+                        (item, index) => (
+                          <li key={index}>
+                            {item}
+                          </li>
+                        )
+                      )}
                     </ul>
                   ) : (
-                    <p>Суттєві ризики не визначені.</p>
+                    <p>
+                      Суттєві ризики не
+                      визначені.
+                    </p>
                   )}
                 </div>
 
                 <div className="ai-card">
                   <h3>Рекомендації</h3>
 
-                  {aiAnalysis.advice?.length > 0 ? (
+                  {aiAnalysis.advice?.length >
+                  0 ? (
                     <ul>
-                      {aiAnalysis.advice.map((item, index) => (
-                        <li key={index}>{item}</li>
-                      ))}
+                      {aiAnalysis.advice.map(
+                        (item, index) => (
+                          <li key={index}>
+                            {item}
+                          </li>
+                        )
+                      )}
                     </ul>
                   ) : (
-                    <p>Рекомендації відсутні.</p>
+                    <p>
+                      Рекомендації відсутні.
+                    </p>
                   )}
                 </div>
               </div>
@@ -349,10 +504,157 @@ function App() {
           )}
         </section>
 
+        <section className="panel assistant-panel">
+          <div className="operations-header">
+            <div>
+              <p className="section-kicker">
+                AI ASSISTANT
+              </p>
+
+              <h2>The Muse Edit Assistant</h2>
+
+              <p className="assistant-description">
+                Запитай про відправки,
+                повернення або фінанси студії.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleNewChat}
+            >
+              Новий діалог
+            </button>
+          </div>
+
+          <div className="quick-actions">
+            <button
+              type="button"
+              onClick={() =>
+                sendChatMessage(
+                  "Покажи бронювання, які потрібно відправити"
+                )
+              }
+              disabled={chatLoading}
+            >
+              Що треба відправити?
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                sendChatMessage(
+                  "Покажи бронювання, від яких ми чекаємо повернення"
+                )
+              }
+              disabled={chatLoading}
+            >
+              Що чекаємо назад?
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                sendChatMessage(
+                  "Який зараз баланс студії?"
+                )
+              }
+              disabled={chatLoading}
+            >
+              Який баланс?
+            </button>
+          </div>
+
+          <div className="chat-window">
+            {chatMessages.length === 0 && (
+              <div className="chat-empty">
+                <p>
+                  Привіт! Я AI-помічник The
+                  Muse Edit.
+                </p>
+
+                <span>
+                  Можу перевірити заплановані
+                  відправки, очікувані
+                  повернення та фінанси.
+                </span>
+              </div>
+            )}
+
+            {chatMessages.map(
+              (message, index) => (
+                <div
+                  key={`${message.role}-${index}`}
+                  className={`chat-message ${message.role}`}
+                >
+                  <span className="chat-role">
+                    {message.role === "user"
+                      ? "Ви"
+                      : "The Muse Edit AI"}
+                  </span>
+
+                  <p>{message.content}</p>
+                </div>
+              )
+            )}
+
+            {chatLoading && (
+              <div className="chat-message assistant">
+                <span className="chat-role">
+                  The Muse Edit AI
+                </span>
+
+                <p>Думаю...</p>
+              </div>
+            )}
+          </div>
+
+          {chatError && (
+            <p className="state-message error-message">
+              {chatError}
+            </p>
+          )}
+
+          <form
+            className="chat-form"
+            onSubmit={handleChatSubmit}
+          >
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(event) =>
+                setChatInput(event.target.value)
+              }
+              placeholder="Наприклад: що потрібно відправити цього тижня?"
+              disabled={chatLoading}
+            />
+
+            <button
+              type="submit"
+              disabled={
+                chatLoading ||
+                !chatInput.trim()
+              }
+            >
+              Надіслати
+            </button>
+          </form>
+
+          {chatThreadId && (
+            <p className="thread-status">
+              Памʼять діалогу активна
+            </p>
+          )}
+        </section>
+
         <section className="panel">
           <div className="operations-header">
             <div>
-              <p className="section-kicker">HISTORY</p>
+              <p className="section-kicker">
+                HISTORY
+              </p>
+
               <h2>Фінансові операції</h2>
             </div>
 
@@ -362,9 +664,17 @@ function App() {
                 setFilter(event.target.value)
               }
             >
-              <option value="all">Усі</option>
-              <option value="income">Доходи</option>
-              <option value="expense">Витрати</option>
+              <option value="all">
+                Усі
+              </option>
+
+              <option value="income">
+                Доходи
+              </option>
+
+              <option value="expense">
+                Витрати
+              </option>
             </select>
           </div>
 
@@ -406,55 +716,66 @@ function App() {
                   </thead>
 
                   <tbody>
-                    {transactions.map((transaction) => (
-                      <tr key={transaction.id}>
-                        <td>{transaction.date}</td>
+                    {transactions.map(
+                      (transaction) => (
+                        <tr key={transaction.id}>
+                          <td>
+                            {transaction.date}
+                          </td>
 
-                        <td>
-                          {transaction.client_name || "-"}
-                        </td>
+                          <td>
+                            {transaction.client_name ||
+                              "-"}
+                          </td>
 
-                        <td>
-                          <span
-                            className={
-                              transaction.type === "income"
-                                ? "type-badge income"
-                                : "type-badge expense"
+                          <td>
+                            <span
+                              className={
+                                transaction.type ===
+                                "income"
+                                  ? "type-badge income"
+                                  : "type-badge expense"
+                              }
+                            >
+                              {transaction.type ===
+                              "income"
+                                ? "Дохід"
+                                : "Витрата"}
+                            </span>
+                          </td>
+
+                          <td>
+                            {Number(
+                              transaction.amount
+                            ).toFixed(2)}{" "}
+                            грн
+                          </td>
+
+                          <td>
+                            {transaction.category}
+                          </td>
+
+                          <td>
+                            {
+                              transaction.description
                             }
-                          >
-                            {transaction.type === "income"
-                              ? "Дохід"
-                              : "Витрата"}
-                          </span>
-                        </td>
+                          </td>
 
-                        <td>
-                          {Number(
-                            transaction.amount
-                          ).toFixed(2)}{" "}
-                          грн
-                        </td>
-
-                        <td>{transaction.category}</td>
-
-                        <td>
-                          {transaction.description}
-                        </td>
-
-                        <td>
-                          <button
-                            className="delete-button"
-                            onClick={() =>
-                              handleDelete(
-                                transaction.id
-                              )
-                            }
-                          >
-                            Видалити
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                          <td>
+                            <button
+                              className="delete-button"
+                              onClick={() =>
+                                handleDelete(
+                                  transaction.id
+                                )
+                              }
+                            >
+                              Видалити
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    )}
                   </tbody>
                 </table>
               </div>
