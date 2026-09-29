@@ -2,6 +2,7 @@ import json
 import logging
 from collections import defaultdict
 from typing import Dict, List
+from uuid import uuid4
 
 from openai import AsyncOpenAI
 from sqlalchemy import text
@@ -14,6 +15,8 @@ logger = logging.getLogger("uvicorn.error")
 THREAD_MEMORY: Dict[str, List[dict]] = defaultdict(list)
 MAX_MEMORY_MESSAGES = 10
 
+PENDING_ACTIONS: Dict[str, dict] = {}
+
 
 TOOLS = [
     {
@@ -21,9 +24,7 @@ TOOLS = [
         "name": "get_planned_shipments",
         "description": (
             "Отримати активні бронювання студії The Muse Edit, "
-            "які ще потрібно відправити клієнтам. "
-            "Використовуй цей tool, коли користувач питає "
-            "про заплановані або майбутні відправки."
+            "які ще потрібно відправити клієнтам."
         ),
         "parameters": {
             "type": "object",
@@ -64,7 +65,55 @@ TOOLS = [
         },
         "strict": True,
     },
+    {
+        "type": "function",
+        "name": "mark_order_shipped",
+        "description": (
+            "Запропонувати позначити бронювання як відправлене. "
+            "Ця дія НЕ повинна виконуватися одразу. "
+            "Вона лише створює pending action для підтвердження користувачем."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "order_id": {
+                    "type": "integer",
+                    "description": "ID бронювання",
+                }
+            },
+            "required": ["order_id"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "mark_order_returned",
+        "description": (
+            "Запропонувати позначити бронювання як повернене. "
+            "Ця дія НЕ повинна виконуватися одразу. "
+            "Вона лише створює pending action для підтвердження користувачем."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "order_id": {
+                    "type": "integer",
+                    "description": "ID бронювання",
+                }
+            },
+            "required": ["order_id"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
 ]
+
+
+ACTION_TOOL_NAMES = {
+    "mark_order_shipped",
+    "mark_order_returned",
+}
 
 
 async def get_planned_shipments():
@@ -192,12 +241,140 @@ async def get_financial_summary():
     }
 
 
-async def execute_tool(name: str, arguments: dict):
+async def get_order(order_id: int):
+    async with engine.connect() as connection:
+        result = await connection.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    client_name,
+                    status,
+                    rental_status,
+                    planned_shipping_date,
+                    expected_return_date
+                FROM orders
+                WHERE id = :order_id
+                """
+            ),
+            {"order_id": order_id},
+        )
+
+        row = result.mappings().one_or_none()
+
+    if row is None:
+        return None
+
+    return {
+        "order_id": row["id"],
+        "client_name": row["client_name"],
+        "payment_status": row["status"],
+        "rental_status": row["rental_status"],
+        "planned_shipping_date": (
+            str(row["planned_shipping_date"])
+            if row["planned_shipping_date"]
+            else None
+        ),
+        "expected_return_date": (
+            str(row["expected_return_date"])
+            if row["expected_return_date"]
+            else None
+        ),
+    }
+
+
+async def create_pending_action(
+    thread_id: str,
+    action_type: str,
+    order_id: int,
+):
+    order = await get_order(order_id)
+
+    if order is None:
+        return {
+            "success": False,
+            "message": (
+                f"Бронювання №{order_id} не знайдено."
+            ),
+        }, None
+
+    if (
+        action_type == "mark_order_shipped"
+        and order["rental_status"] != "booked"
+    ):
+        return {
+            "success": False,
+            "message": (
+                f"Бронювання №{order_id} має статус "
+                f"{order['rental_status']} і не може бути "
+                "позначене як відправлене."
+            ),
+        }, None
+
+    if (
+        action_type == "mark_order_returned"
+        and order["rental_status"] != "shipped"
+    ):
+        return {
+            "success": False,
+            "message": (
+                f"Бронювання №{order_id} має статус "
+                f"{order['rental_status']} і не може бути "
+                "позначене як повернене."
+            ),
+        }, None
+
+    action_id = str(uuid4())
+
+    if action_type == "mark_order_shipped":
+        title = "Позначити бронювання як відправлене"
+        target_status = "shipped"
+    else:
+        title = "Позначити бронювання як повернене"
+        target_status = "returned"
+
+    pending_action = {
+        "action_id": action_id,
+        "thread_id": thread_id,
+        "action_type": action_type,
+        "order_id": order_id,
+        "client_name": order["client_name"],
+        "current_status": order["rental_status"],
+        "target_status": target_status,
+        "title": title,
+        "status": "pending",
+    }
+
+    PENDING_ACTIONS[action_id] = pending_action
+
+    logger.info(
+        "AI pending action created: %s",
+        pending_action,
+    )
+
+    return {
+        "success": True,
+        "requires_confirmation": True,
+        "action_id": action_id,
+        "message": (
+            f"Дію підготовлено. Потрібне підтвердження "
+            f"для бронювання №{order_id}."
+        ),
+    }, pending_action
+
+
+async def execute_tool(
+    name: str,
+    arguments: dict,
+    thread_id: str,
+):
     logger.info(
         "AI tool call: name=%s arguments=%s",
         name,
         arguments,
     )
+
+    pending_action = None
 
     if name == "get_planned_shipments":
         result = await get_planned_shipments()
@@ -208,6 +385,24 @@ async def execute_tool(name: str, arguments: dict):
     elif name == "get_financial_summary":
         result = await get_financial_summary()
 
+    elif name == "mark_order_shipped":
+        result, pending_action = (
+            await create_pending_action(
+                thread_id=thread_id,
+                action_type=name,
+                order_id=arguments["order_id"],
+            )
+        )
+
+    elif name == "mark_order_returned":
+        result, pending_action = (
+            await create_pending_action(
+                thread_id=thread_id,
+                action_type=name,
+                order_id=arguments["order_id"],
+            )
+        )
+
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -217,7 +412,7 @@ async def execute_tool(name: str, arguments: dict):
         result,
     )
 
-    return result
+    return result, pending_action
 
 
 def get_thread_memory(thread_id: str):
@@ -244,6 +439,14 @@ def add_to_memory(
         ]
 
 
+def get_pending_action(action_id: str):
+    return PENDING_ACTIONS.get(action_id)
+
+
+def remove_pending_action(action_id: str):
+    return PENDING_ACTIONS.pop(action_id, None)
+
+
 async def run_assistant_chat(
     client: AsyncOpenAI,
     thread_id: str,
@@ -257,28 +460,25 @@ async def run_assistant_chat(
             "content": (
                 "Ти AI-помічник студії оренди одягу "
                 "The Muse Edit. "
-                "Твоя задача — допомагати власниці студії "
-                "контролювати бронювання, відправки, "
-                "повернення та фінанси. "
-                "Якщо користувач питає, які бронювання "
-                "потрібно відправити, які відправки "
-                "заплановані або що треба відправити "
-                "найближчим часом, використовуй "
-                "get_planned_shipments. "
-                "Якщо користувач питає, які бронювання "
-                "очікуємо назад, хто має повернути речі "
-                "або які повернення заплановані, "
-                "використовуй get_expected_returns. "
-                "Якщо користувач питає про доходи, "
-                "витрати або баланс, використовуй "
-                "get_financial_summary. "
-                "Усі tools є read-only. "
-                "Ніколи не змінюй дані в базі. "
+                "Допомагай власниці контролювати "
+                "бронювання, відправки, повернення "
+                "та фінанси. "
+                "Для читання актуальних даних використовуй "
+                "read-only tools. "
+                "Якщо користувач просить позначити "
+                "бронювання як відправлене, використовуй "
+                "mark_order_shipped. "
+                "Якщо користувач просить позначити "
+                "бронювання як повернене, використовуй "
+                "mark_order_returned. "
+                "Action tools ніколи не змінюють базу "
+                "безпосередньо. Вони лише створюють "
+                "pending action для підтвердження. "
+                "Після створення pending action прямо скажи, "
+                "що дія очікує підтвердження користувача. "
+                "Не стверджуй, що статус уже змінено. "
                 "Не вигадуй клієнтів, дати, суми, "
                 "бронювання або статуси. "
-                "Якщо tool повернув порожній список, "
-                "прямо скажи, що відповідних бронювань "
-                "зараз немає. "
                 "Відповідай українською мовою, "
                 "коротко та зрозуміло."
             ),
@@ -302,6 +502,7 @@ async def run_assistant_chat(
     )
 
     tool_outputs = []
+    pending_action = None
 
     for item in response.output:
         if item.type != "function_call":
@@ -311,10 +512,30 @@ async def run_assistant_chat(
             item.arguments or "{}"
         )
 
-        result = await execute_tool(
-            name=item.name,
-            arguments=arguments,
-        )
+        if (
+            item.name in ACTION_TOOL_NAMES
+            and pending_action is not None
+        ):
+            result = {
+                "success": False,
+                "message": (
+                    "За один запит можна підготувати "
+                    "лише одну контрольовану дію."
+                ),
+            }
+            current_pending_action = None
+
+        else:
+            result, current_pending_action = (
+                await execute_tool(
+                    name=item.name,
+                    arguments=arguments,
+                    thread_id=thread_id,
+                )
+            )
+
+        if current_pending_action:
+            pending_action = current_pending_action
 
         tool_outputs.append(
             {
@@ -355,4 +576,5 @@ async def run_assistant_chat(
         "memory_size": len(
             get_thread_memory(thread_id)
         ),
+        "pending_action": pending_action,
     }

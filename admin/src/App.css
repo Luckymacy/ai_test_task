@@ -536,3 +536,75 @@ tr:hover td {
   font-size: 12px;
   text-align: right;
 }
+.action-confirmation-card {
+  border: 1px solid #d8b7a7;
+  background: #fff8f3;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 10px 24px rgba(75, 40, 30, 0.06);
+}
+
+.action-label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #8b1e3f;
+}
+
+.action-confirmation-card h3 {
+  margin: 0 0 16px;
+  color: #5f1730;
+}
+
+.action-details {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.action-details p {
+  margin: 0;
+}
+
+.action-warning {
+  margin: 14px 0 18px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f3e7df;
+  color: #6a554d;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.confirm-action-button {
+  border: none;
+  background: #8b1e3f;
+  color: #ffffff;
+  padding: 11px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cancel-action-button {
+  border: 1px solid #8b1e3f;
+  background: transparent;
+  color: #8b1e3f;
+  padding: 11px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.confirm-action-button:disabled,
+.cancel-action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
