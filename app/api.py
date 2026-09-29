@@ -11,7 +11,11 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.assistant import run_assistant_chat
+from app.assistant import (
+    get_pending_action,
+    remove_pending_action,
+    run_assistant_chat,
+)
 from app.database import engine
 from app.prompts import build_improved_prompt
 
@@ -20,8 +24,9 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-
-app = FastAPI(title="Dress Rental Planner API")
+app = FastAPI(
+    title="Dress Rental Planner API"
+)
 
 
 app.add_middleware(
@@ -43,7 +48,10 @@ app.add_middleware(
 class TransactionCreate(BaseModel):
     type: Literal["income", "expense"]
     amount: float = Field(gt=0)
-    category: str = Field(min_length=1, max_length=100)
+    category: str = Field(
+        min_length=1,
+        max_length=100,
+    )
     description: str = Field(min_length=1)
     date: Optional[date] = None
 
@@ -55,9 +63,11 @@ class ChatRequest(BaseModel):
 
 @app.get("/api/transactions")
 async def get_transactions(
-    transaction_type: Literal["all", "income", "expense"] = Query(
-        default="all"
-    )
+    transaction_type: Literal[
+        "all",
+        "income",
+        "expense",
+    ] = Query(default="all")
 ):
     async with engine.connect() as connection:
         if transaction_type == "all":
@@ -80,6 +90,7 @@ async def get_transactions(
                     """
                 )
             )
+
         else:
             result = await connection.execute(
                 text(
@@ -101,7 +112,8 @@ async def get_transactions(
                     """
                 ),
                 {
-                    "transaction_type": transaction_type,
+                    "transaction_type":
+                        transaction_type
                 },
             )
 
@@ -115,7 +127,7 @@ async def get_transactions(
 
 @app.post("/api/transactions")
 async def create_transaction(
-    transaction: TransactionCreate
+    transaction: TransactionCreate,
 ):
     transaction_date = (
         transaction.date or date.today()
@@ -154,7 +166,8 @@ async def create_transaction(
                 "type": transaction.type,
                 "amount": transaction.amount,
                 "category": transaction.category,
-                "description": transaction.description,
+                "description":
+                    transaction.description,
             },
         )
 
@@ -165,9 +178,11 @@ async def create_transaction(
     return created_transaction
 
 
-@app.delete("/api/transactions/{transaction_id}")
+@app.delete(
+    "/api/transactions/{transaction_id}"
+)
 async def delete_transaction(
-    transaction_id: int
+    transaction_id: int,
 ):
     async with engine.begin() as connection:
         result = await connection.execute(
@@ -179,11 +194,14 @@ async def delete_transaction(
                 """
             ),
             {
-                "transaction_id": transaction_id,
+                "transaction_id":
+                    transaction_id
             },
         )
 
-        deleted_id = result.scalar_one_or_none()
+        deleted_id = (
+            result.scalar_one_or_none()
+        )
 
     if deleted_id is None:
         raise HTTPException(
@@ -241,12 +259,16 @@ async def get_summary():
     }
 
 
-@app.post("/api/ai/analyze-transactions")
+@app.post(
+    "/api/ai/analyze-transactions"
+)
 async def analyze_transactions():
     if not OPENAI_API_KEY:
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is not set",
+            detail=(
+                "OPENAI_API_KEY is not set"
+            ),
         )
 
     async with engine.connect() as connection:
@@ -271,7 +293,9 @@ async def analyze_transactions():
     if not rows:
         raise HTTPException(
             status_code=404,
-            detail="No transactions to analyze",
+            detail=(
+                "No transactions to analyze"
+            ),
         )
 
     transactions = []
@@ -281,25 +305,34 @@ async def analyze_transactions():
             {
                 "date": str(row["date"]),
                 "type": row["type"],
-                "amount": float(row["amount"]),
+                "amount": float(
+                    row["amount"]
+                ),
                 "category": row["category"],
-                "description": row["description"],
+                "description":
+                    row["description"],
             }
         )
 
-    prompt = build_improved_prompt(transactions)
+    prompt = build_improved_prompt(
+        transactions
+    )
 
     try:
         client = AsyncOpenAI(
             api_key=OPENAI_API_KEY
         )
 
-        response = await client.responses.create(
-            model="gpt-5.6-luna",
-            input=prompt,
+        response = (
+            await client.responses.create(
+                model="gpt-5.6-luna",
+                input=prompt,
+            )
         )
 
-        ai_text = response.output_text.strip()
+        ai_text = (
+            response.output_text.strip()
+        )
 
         analysis = json.loads(ai_text)
 
@@ -312,7 +345,10 @@ async def analyze_transactions():
     except Exception as error:
         raise HTTPException(
             status_code=500,
-            detail=f"AI analysis failed: {str(error)}",
+            detail=(
+                "AI analysis failed: "
+                f"{str(error)}"
+            ),
         )
 
     required_fields = [
@@ -327,7 +363,8 @@ async def analyze_transactions():
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"AI response is missing field: {field}"
+                    "AI response is missing "
+                    f"field: {field}"
                 ),
             )
 
@@ -336,16 +373,19 @@ async def analyze_transactions():
 
 @app.post("/api/ai/chat")
 async def ai_chat(
-    request: ChatRequest
+    request: ChatRequest,
 ):
     if not OPENAI_API_KEY:
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY is not set",
+            detail=(
+                "OPENAI_API_KEY is not set"
+            ),
         )
 
     thread_id = (
-        request.thread_id or str(uuid4())
+        request.thread_id
+        or str(uuid4())
     )
 
     try:
@@ -364,5 +404,249 @@ async def ai_chat(
     except Exception as error:
         raise HTTPException(
             status_code=500,
-            detail=f"AI chat failed: {str(error)}",
+            detail=(
+                "AI chat failed: "
+                f"{str(error)}"
+            ),
         )
+
+
+@app.post(
+    "/api/ai/actions/{action_id}/confirm"
+)
+async def confirm_ai_action(
+    action_id: str,
+):
+    action = get_pending_action(
+        action_id
+    )
+
+    if action is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Pending action not found"
+            ),
+        )
+
+    order_id = action["order_id"]
+    current_status = (
+        action["current_status"]
+    )
+    target_status = (
+        action["target_status"]
+    )
+
+    audit_details = json.dumps(
+        {
+            "client_name":
+                action["client_name"],
+            "previous_status":
+                current_status,
+            "new_status":
+                target_status,
+        },
+        ensure_ascii=False,
+    )
+
+    async with engine.begin() as connection:
+        result = await connection.execute(
+            text(
+                """
+                UPDATE orders
+                SET rental_status = :target_status
+                WHERE id = :order_id
+                  AND rental_status =
+                      :current_status
+                RETURNING id
+                """
+            ),
+            {
+                "target_status":
+                    target_status,
+                "order_id":
+                    order_id,
+                "current_status":
+                    current_status,
+            },
+        )
+
+        updated_order_id = (
+            result.scalar_one_or_none()
+        )
+
+        if updated_order_id is None:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO
+                        ai_action_audit_log (
+                            action_id,
+                            action_type,
+                            order_id,
+                            status,
+                            details
+                        )
+                    VALUES (
+                        :action_id,
+                        :action_type,
+                        :order_id,
+                        'failed',
+                        :details
+                    )
+                    """
+                ),
+                {
+                    "action_id":
+                        action_id,
+                    "action_type":
+                        action["action_type"],
+                    "order_id":
+                        order_id,
+                    "details":
+                        audit_details,
+                },
+            )
+
+            remove_pending_action(
+                action_id
+            )
+
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Order status changed "
+                    "before confirmation. "
+                    "Action was not executed."
+                ),
+            )
+
+        await connection.execute(
+            text(
+                """
+                INSERT INTO
+                    ai_action_audit_log (
+                        action_id,
+                        action_type,
+                        order_id,
+                        status,
+                        details
+                    )
+                VALUES (
+                    :action_id,
+                    :action_type,
+                    :order_id,
+                    'confirmed',
+                    :details
+                )
+                """
+            ),
+            {
+                "action_id":
+                    action_id,
+                "action_type":
+                    action["action_type"],
+                "order_id":
+                    order_id,
+                "details":
+                    audit_details,
+            },
+        )
+
+    remove_pending_action(
+        action_id
+    )
+
+    return {
+        "success": True,
+        "status": "confirmed",
+        "action_id": action_id,
+        "order_id": order_id,
+        "new_rental_status":
+            target_status,
+        "message": (
+            f"Бронювання №{order_id} "
+            f"успішно отримало статус "
+            f"{target_status}."
+        ),
+    }
+
+
+@app.post(
+    "/api/ai/actions/{action_id}/cancel"
+)
+async def cancel_ai_action(
+    action_id: str,
+):
+    action = get_pending_action(
+        action_id
+    )
+
+    if action is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Pending action not found"
+            ),
+        )
+
+    audit_details = json.dumps(
+        {
+            "client_name":
+                action["client_name"],
+            "current_status":
+                action["current_status"],
+            "requested_status":
+                action["target_status"],
+        },
+        ensure_ascii=False,
+    )
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO
+                    ai_action_audit_log (
+                        action_id,
+                        action_type,
+                        order_id,
+                        status,
+                        details
+                    )
+                VALUES (
+                    :action_id,
+                    :action_type,
+                    :order_id,
+                    'cancelled',
+                    :details
+                )
+                """
+            ),
+            {
+                "action_id":
+                    action_id,
+                "action_type":
+                    action["action_type"],
+                "order_id":
+                    action["order_id"],
+                "details":
+                    audit_details,
+            },
+        )
+
+    remove_pending_action(
+        action_id
+    )
+
+    return {
+        "success": True,
+        "status": "cancelled",
+        "action_id": action_id,
+        "order_id":
+            action["order_id"],
+        "message": (
+            "Дію скасовано. "
+            "Дані бронювання не змінено."
+        ),
+    }
