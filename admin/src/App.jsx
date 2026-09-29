@@ -32,6 +32,10 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
 
+  const [pendingAction, setPendingAction] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
+
   const loadData = async () => {
     setLoading(true);
     setError("");
@@ -160,7 +164,6 @@ function App() {
       }
 
       setAiAnalysis(null);
-
       await loadData();
     } catch (err) {
       setError(err.message);
@@ -191,7 +194,6 @@ function App() {
       }
 
       const data = await response.json();
-
       setAiAnalysis(data);
     } catch (err) {
       setAiError(err.message);
@@ -208,6 +210,7 @@ function App() {
     }
 
     setChatError("");
+    setActionError("");
     setChatLoading(true);
 
     setChatMessages((prev) => [
@@ -257,6 +260,10 @@ function App() {
           content: data.answer,
         },
       ]);
+
+      if (data.pending_action) {
+        setPendingAction(data.pending_action);
+      }
     } catch (err) {
       setChatError(err.message);
     } finally {
@@ -269,11 +276,105 @@ function App() {
     await sendChatMessage(chatInput);
   };
 
+  const handleConfirmAction = async () => {
+    if (!pendingAction) {
+      return;
+    }
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/ai/actions/${pendingAction.action_id}/confirm`,
+        {
+          method: "POST",
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response
+          .json()
+          .catch(() => null);
+
+        throw new Error(
+          errorData?.detail ||
+            "Не вдалося підтвердити дію"
+        );
+      }
+
+      const data = await response.json();
+
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.message,
+        },
+      ]);
+
+      setPendingAction(null);
+
+      await loadData();
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancelAction = async () => {
+    if (!pendingAction) {
+      return;
+    }
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/ai/actions/${pendingAction.action_id}/cancel`,
+        {
+          method: "POST",
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response
+          .json()
+          .catch(() => null);
+
+        throw new Error(
+          errorData?.detail ||
+            "Не вдалося скасувати дію"
+        );
+      }
+
+      const data = await response.json();
+
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.message,
+        },
+      ]);
+
+      setPendingAction(null);
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleNewChat = () => {
     setChatMessages([]);
     setChatThreadId(null);
     setChatInput("");
     setChatError("");
+    setPendingAction(null);
+    setActionError("");
   };
 
   return (
@@ -575,9 +676,9 @@ function App() {
                 </p>
 
                 <span>
-                  Можу перевірити заплановані
-                  відправки, очікувані
-                  повернення та фінанси.
+                  Можу перевірити відправки,
+                  повернення, фінанси та
+                  підготувати контрольовану дію.
                 </span>
               </div>
             )}
@@ -610,6 +711,76 @@ function App() {
             )}
           </div>
 
+          {pendingAction && (
+            <div className="action-confirmation-card">
+              <p className="action-label">
+                ПОТРІБНЕ ПІДТВЕРДЖЕННЯ
+              </p>
+
+              <h3>{pendingAction.title}</h3>
+
+              <div className="action-details">
+                <p>
+                  <strong>Бронювання:</strong>{" "}
+                  №{pendingAction.order_id}
+                </p>
+
+                <p>
+                  <strong>Клієнт:</strong>{" "}
+                  {pendingAction.client_name || "-"}
+                </p>
+
+                <p>
+                  <strong>
+                    Поточний статус:
+                  </strong>{" "}
+                  {pendingAction.current_status}
+                </p>
+
+                <p>
+                  <strong>
+                    Новий статус:
+                  </strong>{" "}
+                  {pendingAction.target_status}
+                </p>
+              </div>
+
+              <p className="action-warning">
+                AI підготував дію, але дані ще
+                не змінені. Зміна відбудеться
+                лише після підтвердження.
+              </p>
+
+              {actionError && (
+                <p className="state-message error-message">
+                  {actionError}
+                </p>
+              )}
+
+              <div className="action-buttons">
+                <button
+                  type="button"
+                  className="confirm-action-button"
+                  onClick={handleConfirmAction}
+                  disabled={actionLoading}
+                >
+                  {actionLoading
+                    ? "Виконую..."
+                    : "Підтвердити"}
+                </button>
+
+                <button
+                  type="button"
+                  className="cancel-action-button"
+                  onClick={handleCancelAction}
+                  disabled={actionLoading}
+                >
+                  Скасувати
+                </button>
+              </div>
+            </div>
+          )}
+
           {chatError && (
             <p className="state-message error-message">
               {chatError}
@@ -626,7 +797,7 @@ function App() {
               onChange={(event) =>
                 setChatInput(event.target.value)
               }
-              placeholder="Наприклад: що потрібно відправити цього тижня?"
+              placeholder="Наприклад: познач бронювання №3 як повернене"
               disabled={chatLoading}
             />
 
