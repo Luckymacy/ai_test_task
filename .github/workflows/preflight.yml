@@ -35,10 +35,5 @@ jobs:
         working-directory: admin
         run: npm ci
 
-      - name: Intentional CI failure
-        run: |
-          echo "Intentional failure for CI verification"
-          exit 1
-
       - name: Run project preflight
         run: python3 scripts/preflight.py
