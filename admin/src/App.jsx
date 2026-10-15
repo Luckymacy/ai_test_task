@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const API_URL = "http://127.0.0.1:8001";
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://127.0.0.1:8001";
 
 function App() {
   const [transactions, setTransactions] = useState([]);
@@ -561,8 +562,7 @@ function App() {
                 <div className="ai-card">
                   <h3>Ризики</h3>
 
-                  {aiAnalysis.risks?.length >
-                  0 ? (
+                  {aiAnalysis.risks?.length > 0 ? (
                     <ul>
                       {aiAnalysis.risks.map(
                         (item, index) => (
@@ -574,8 +574,7 @@ function App() {
                     </ul>
                   ) : (
                     <p>
-                      Суттєві ризики не
-                      визначені.
+                      Суттєві ризики не визначені.
                     </p>
                   )}
                 </div>
@@ -583,8 +582,7 @@ function App() {
                 <div className="ai-card">
                   <h3>Рекомендації</h3>
 
-                  {aiAnalysis.advice?.length >
-                  0 ? (
+                  {aiAnalysis.advice?.length > 0 ? (
                     <ul>
                       {aiAnalysis.advice.map(
                         (item, index) => (
@@ -671,8 +669,7 @@ function App() {
             {chatMessages.length === 0 && (
               <div className="chat-empty">
                 <p>
-                  Привіт! Я AI-помічник The
-                  Muse Edit.
+                  Привіт! Я AI-помічник The Muse Edit.
                 </p>
 
                 <span>
